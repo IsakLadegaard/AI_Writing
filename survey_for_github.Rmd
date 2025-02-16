@@ -1,0 +1,164 @@
+```{r setup, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(tidyr)
+library(extrafont)
+data <- read.csv("https://raw.githubusercontent.com/IsakLadegaard/AI_Writing/main/survey_data.csv")
+```
+
+```{r}
+summary_table <- data %>%
+  count(MainAnswer) %>%      
+  mutate(Percentage = n / sum(n) * 100) %>%
+  bind_rows(tibble(MainAnswer = "Total",
+                   n = sum(.$n),
+                   Percentage = sum(.$Percentage)))
+print(summary_table)
+
+```
+
+```{r fisher's exact test}
+fisher_data_3cat <- data %>%
+  mutate(MainAnswer = case_when(
+    MainAnswer == "Strongly Agree" ~ "Agree",
+    MainAnswer == "Strongly Disagree" ~ "Disagree",
+    TRUE ~ MainAnswer
+  )) %>%
+  filter(MainAnswer %in% c("Agree", "Disagree", "Neither Agree nor Disagree")) %>%
+  group_by(Type, MainAnswer) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  pivot_wider(names_from  = MainAnswer,
+              values_from = Count,
+              values_fill = 0)
+
+#fisher_data_3cat <- fisher_data_3cat[fisher_data_3cat$Type != 'ECON', ] 
+# this line removes one discipline to allow for pairwise comparison of the remaining two. E.g., in this case, we remove ECON to do a pairwise comparison of POL and HIS.
+
+fisher_matrix_3cat <- as.matrix(fisher_data_3cat[, -1])
+rownames(fisher_matrix_3cat) <- fisher_data_3cat$Type
+fisher_result_3cat <- fisher.test(fisher_matrix_3cat)
+fisher_result_3cat
+```
+
+```{r test - does AI experience matter?}
+data_ai <- data %>%
+  mutate(Writing_articles_book = case_when(
+    Writing_articles_book %in% c("Never", "Rarely") ~ "Low",
+    Writing_articles_book %in% c("Sometimes", "Often") ~ "High",
+    Writing_articles_book == "No_response" ~ "No_response",
+    TRUE ~ Writing_articles_book
+  )) %>%
+  mutate(AI_Use_Prof_Aggregated = case_when(
+    Writing_articles_book == "High" ~ "High",
+    Writing_articles_book == "Low" ~ "Low",
+    Writing_articles_book == "No_response" ~ "No_response",
+    TRUE ~ "Moderate"
+  ))
+summary_table_ai <- data_ai %>%
+  count(AI_Use_Prof_Aggregated, MainAnswer) %>%            
+  pivot_wider(names_from = MainAnswer,                     
+              values_from = n, 
+              values_fill = 0) %>%
+  filter(AI_Use_Prof_Aggregated != "No_response")
+fisher_matrix_ai <- as.matrix(summary_table_ai[, -1]) 
+rownames(fisher_matrix_ai) <- summary_table_ai$AI_Use_Prof_Aggregated
+fisher_result <- fisher.test(apply(fisher_matrix_ai, 2, as.numeric))
+summary_table_ai
+fisher_result
+```
+
+
+```{r wide agreememnt levels for all, and for disciplines, 2 plots}
+data1 <- data %>%
+  mutate(MainAnswer = if_else(MainAnswer == "Neither Agree nor Disagree", "Neither", MainAnswer)) %>%
+  mutate(MainAnswer = factor(MainAnswer, levels = c("Strongly Agree", "Agree", "Neither", "Disagree", "Strongly Disagree")))
+data2 <- data %>%
+  mutate(MainAnswer = case_when(
+    MainAnswer == "Strongly Agree" ~ "Agree",
+    MainAnswer == "Strongly Disagree" ~ "Disagree",
+    MainAnswer == "Neither Agree nor Disagree" ~ "Neither",
+    TRUE ~ MainAnswer 
+  )) %>%
+  mutate(MainAnswer = factor(MainAnswer, levels = c("Agree", "Neither", "Disagree")))
+plot_data_overall <- data1 %>%
+  count(MainAnswer) %>%
+  mutate(Percentage = n / sum(n) * 100)
+plot_data_by_discipline <- data2 %>%
+  group_by(Type, MainAnswer) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  mutate(Percentage = Count / sum(Count) * 100)
+maldives_palette1 <- c(
+  "Strongly Agree"     = "#1B705B",
+  "Agree"              = "#57B893",
+  "Neither"            = "#7CA9B0",
+  "Disagree"           = "#457B9D",
+  "Strongly Disagree"  = "#1D5173"
+)
+maldives_palette2 <- c(
+  "Agree"     = "#92DEE4",
+  "Neither"   = "#3379B7",
+  "Disagree"  = "#4DB7D3"
+)
+plot1 <- ggplot(plot_data_overall, aes(x = MainAnswer, y = Percentage, fill = MainAnswer)) +
+  geom_bar(stat = "identity", color = "navy", size = 0.01) +
+  scale_fill_manual(values = maldives_palette1, breaks = c("Agree", "Neither", "Disagree")) +
+  labs(x = "", y = "Percentage of Responses", fill = "") +
+  theme_minimal(base_family = "Helvetica") +
+  theme(text = element_text(family = "Helvetica"),  
+        legend.position = "none",                     
+        axis.title = element_text(size = 12),                        
+        axis.text = element_text(size = 10),                     
+        panel.grid = element_blank(),                      
+        axis.line = element_line(color = "black"))
+plot1
+ggsave("overall_agreement_levels.png", plot = plot1, width = 8, height = 6, dpi = 300)
+plot2 <- ggplot(plot_data_by_discipline, aes(x = Type, y = Percentage, fill = MainAnswer)) +
+  geom_bar(stat = "identity", position = "dodge", color = "navy", size = 0.01) +
+  scale_fill_manual(values = maldives_palette2, breaks = c("Agree", "Neither", "Disagree")) +
+  labs(x = "Discipline", y = "Percentage of Responses", fill = "") +
+  theme_minimal(base_family = "Helvetica") +
+  theme(text = element_text(family = "Helvetica"),  
+        legend.position = "top",                                     
+        legend.direction = "horizontal",                             
+        legend.title = element_text(size = 10),                      
+        legend.text = element_text(size = 10),                       
+        axis.title = element_text(size = 12),                        
+        axis.text = element_text(size = 10),                         
+        panel.grid = element_blank(),                          
+        axis.line = element_line(color = "black"))
+plot2
+ggsave("discipline_wide_agreement_levels.png", plot = plot2, width = 10, height = 6, dpi = 300)
+```
+
+```{r flipped viz for the three disciplines}
+fisher_data <- data2 %>%
+  count(Type, MainAnswer) %>%
+  pivot_wider(names_from = MainAnswer, values_from = n, values_fill = list(n = 0)) %>%
+  select(Type, Agree, Neither, Disagree)
+fisher_data_long <- fisher_data %>%
+  pivot_longer(cols = c(Agree, Neither, Disagree), names_to = "Response", values_to = "Count") %>%
+  group_by(Type) %>%
+  mutate(Percentage = Count / sum(Count) * 100,
+         Response = factor(Response, levels = c("Disagree", "Neither", "Agree")))
+p3 <- ggplot(fisher_data_long, aes(x = Type, y = Percentage, fill = Response)) +
+  geom_bar(stat = "identity", position = "fill", color = "navy", size = 0.01) +
+  scale_fill_manual(
+    values = c("Agree" = "#4DB7D3", "Neither" = "#92DEE4", "Disagree" = "#4D88D3"),
+    breaks = c("Agree", "Neither", "Disagree")
+  ) +
+  labs(x = NULL, y = NULL, fill = "") +
+  theme_minimal(base_family = "Helvetica", base_size = 14) +
+  scale_y_continuous(labels = function(x) paste0(x * 100, "%")) +
+  theme(panel.grid = element_blank(),
+        axis.line = element_line(color = "black"),
+        legend.position = "top",
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 14),
+        legend.margin = margin(t = 0, r = 0, b = -10, l = 0),
+        plot.margin = margin(t = 10, r = 10, b = 10, l = 10)) +
+  coord_flip()
+p3
+ggsave("discipline_stackedbars_custom_legend_order.png", plot = p3, width = 10, height = 6, dpi = 600)
+```
